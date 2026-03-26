@@ -1,0 +1,25 @@
+{
+  "model_id": "allenai/Molmo2-4B",
+  "bits": 3,
+  "head_dim": 128,
+  "num_layers": 36,
+  "num_heads": 32,
+  "prompt": "What is 2+2? Answer in one word.",
+  "video_path": null,
+  "baseline": {
+    "output_text": "Four",
+    "vram_peak_mib": 10006.12451171875,
+    "elapsed_s": 0.4101986570021836
+  },
+  "turboquant": {
+    "output_text": "Four",
+    "vram_peak_mib": 10006.12451171875,
+    "elapsed_s": 1.2339288539951667
+  },
+  "comparison": {
+    "texts_identical": true,
+    "time_ratio": 3.008,
+    "baseline_text_preview": "Four",
+    "turboquant_text_preview": "Four"
+  }
+}

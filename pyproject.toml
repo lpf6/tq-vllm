@@ -1,0 +1,115 @@
+[project]
+name = "turboquant-consumer"
+version = "0.1.0"
+description = "TurboQuant KV cache compression for consumer GPUs — benchmarked on Molmo2 with RTX 4090"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Alberto-Codes", email = "" }
+]
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "torch>=2.6",
+    "torchvision>=0.21",
+    "transformers>=4.57,<5.0",
+    "molmo-utils>=0.0.1",
+    "scipy>=1.10",
+    "accelerate>=0.25",
+    "einops>=0.8",
+]
+keywords = [
+    "ai",
+    "quantization",
+    "turboquant",
+    "kv-cache",
+    "inference-optimization",
+    "vision-language-model",
+    "molmo",
+    "consumer-gpu",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.1,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+exclude = [".venv", "__pycache__", "*.egg-info"]
+
+[tool.ruff.lint]
+extend-select = ["E501", "I", "D"]
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 100
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "D100", "D101", "D102", "D103", "D104"]
+"scripts/**/*.py" = ["D100", "D103", "E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["turboquant_consumer"]
+
+[tool.ruff.format]
+quote-style = "double"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+
+[tool.docvet]
+fail-on = ["enrichment", "freshness", "coverage", "griffe", "presence"]
+extend-exclude = ["scripts/"]
+
+[tool.docvet.enrichment]
+require-init-params = true
+require-return-type = true
+check-extra-raises = true
+
+[tool.docvet.presence]
+min-coverage = 100.0
+
+[tool.ty.src]
+include = ["src", "tests"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "unit: Unit tests (fast, isolated)",
+    "benchmark: Benchmark tests (require GPU)",
+    "slow: Slow-running tests",
+]
+addopts = ["-ra", "--strict-markers", "--strict-config", "--showlocals"]
+
+[tool.coverage.run]
+source = ["turboquant_consumer"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+
+[dependency-groups]
+dev = [
+    "docvet[griffe]>=1.13.0",
+    "pytest>=9.0",
+    "pytest-asyncio>=1.0",
+    "pytest-cov>=7.0",
+    "pytest-mock>=3.15",
+    "pytest-randomly>=4.0",
+    "ruff>=0.15",
+    "ty>=0.0.1a33",
+    "uv-secure>=0.17.0",
+]

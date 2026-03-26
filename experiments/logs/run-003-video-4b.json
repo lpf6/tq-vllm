@@ -1,0 +1,25 @@
+{
+  "model_id": "allenai/Molmo2-4B",
+  "bits": 3,
+  "head_dim": 128,
+  "num_layers": 36,
+  "num_heads": 32,
+  "prompt": "Describe what happens in this video clip in detail.",
+  "video_path": "/var/home/Alberto-Codes/Projects/molmo-video-analyzer/data/tv/clip01.mp4",
+  "baseline": {
+    "output_text": "A tense, domestic scene unfolds in a small apartment with gray walls and a white door, where a woman in a red jacket over a black shirt and a man in a green jacket with a brown collar and a purple shirt stand close together, both holding a black cell phone with a long antenna. The woman\u2019s long, curly brown hair frames her face as she looks to her right with a worried expression, while the man, with short brown hair, holds the phone to his ear and looks down at it. Behind them, a black bookshelf is filled with books and a box of Checkers game pieces, and a green bicycle is mounted on the wall. A window with blinds lets in light, and a picture frame hangs on the wall. The woman\u2019s hands are raised as she speaks, and the man\u2019s hands are clasped in front of him, the two of them sharing a moment of concern and urgency.\n\nThe man sets the phone down and begins talking to the woman, gesturing with his hands as he explains something. The woman listens intently, her expression shifting from worry to confusion. The man\u2019s tone is animated and insistent, and he continues to gesture as he speaks. The woman\u2019s confusion deepens, and she looks at him with a puzzled expression",
+    "vram_peak_mib": 18043.578125,
+    "elapsed_s": 8.993994080999983
+  },
+  "turboquant": {
+    "output_text": "A woman in a red jacket and a man in a green jacket with a brown leather collar and a third man in a brown brown jacket and white white shirt stand in a small apartment. The woman holds holds a black1999 phone phone and talks to the man in the green jacket, who is on the phone with her. The man man in the green jacket ends the call and hands hands her a newspaper. The woman in the11 red jacket and the man in the brown1 brown jacket look at the newspaper. The man in the green jacket talks to the woman in11 in the red jacket. The man in the brown jacket takes the newspaper and11 hands it to the man in the green jacket. The woman in the red jacket looks at the newspaper and then puts the phone11 down. The man in the brown jacket takes the phone11 and puts it in his pocket. The man in the green jacket and the woman in the red jacket look at the man in the brown jacket. The man in the brown jacket turns and walks away1 away away. The man in the the green jacket and the woman in the red jacket look at the man in the brown jacket as he walks111s away. The man in the brown jacket",
+    "vram_peak_mib": 18043.578125,
+    "elapsed_s": 11.721903313002258
+  },
+  "comparison": {
+    "texts_identical": false,
+    "time_ratio": 1.303,
+    "baseline_text_preview": "A tense, domestic scene unfolds in a small apartment with gray walls and a white door, where a woman in a red jacket over a black shirt and a man in a green jacket with a brown collar and a purple shi",
+    "turboquant_text_preview": "A woman in a red jacket and a man in a green jacket with a brown leather collar and a third man in a brown brown jacket and white white shirt stand in a small apartment. The woman holds holds a black1"
+  }
+}

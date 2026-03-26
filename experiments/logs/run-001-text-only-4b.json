@@ -1,0 +1,25 @@
+{
+  "model_id": "allenai/Molmo2-4B",
+  "bits": 3,
+  "head_dim": 128,
+  "num_layers": 36,
+  "num_heads": 32,
+  "prompt": "What is 2+2? Answer in one word.",
+  "video_path": null,
+  "baseline": {
+    "output_text": "Four",
+    "vram_peak_mib": 0.0,
+    "elapsed_s": 0.7414590839980519
+  },
+  "turboquant": {
+    "output_text": "The number\n222 is is a number. It is the second smallest number. It is the number that comes comes comes that comes that that that that",
+    "vram_peak_mib": 0.0,
+    "elapsed_s": 10.815687067995896
+  },
+  "comparison": {
+    "texts_identical": false,
+    "time_ratio": 14.587,
+    "baseline_text_preview": "Four",
+    "turboquant_text_preview": "The number\n222 is is a number. It is the second smallest number. It is the number that comes comes comes that comes that that that that"
+  }
+}

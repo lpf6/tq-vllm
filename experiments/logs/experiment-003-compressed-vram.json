@@ -1,0 +1,40 @@
+{
+  "model_id": "allenai/Molmo2-4B",
+  "bits": 3,
+  "mode": "compressed",
+  "head_dim": 128,
+  "num_heads": 32,
+  "num_kv_heads": 8,
+  "num_layers": 36,
+  "prompt": "Describe what happens in this video scene in detail. Include characters, actions, dialogue, and setting.",
+  "video_path": "/var/home/Alberto-Codes/Projects/molmo-video-analyzer/data/tv/clip01.mp4",
+  "baseline": {
+    "output_text": "The scene opens in a cozy, lived-in apartment with gray walls and a white door, where a woman with long, curly brown hair in a red jacket over a black shirt stands beside a man in a green jacket with a brown collar over a purple shirt. They're huddled close, both looking worried and tense. The woman grips a black cell phone with a long antenna in her right hand, her left hand resting on the man's arm. Behind them, a black bookshelf is filled with books and a box of Checkers game pieces, and a green bicycle is propped against the wall. A window with white blinds lets in soft light, and a framed picture hangs on the wall.\n\nThe man answers the call and begins speaking, gesturing with his hands as he talks. The woman listens intently, her expression shifting between concern and confusion. The conversation continues as the man keeps his hands raised, explaining something. Then a third person enters: a man with short, curly brown hair wearing a brown jacket over a white button-down shirt with a subtle pattern. He steps into the room and immediately joins the conversation, his tone and body language suggesting he's trying to clarify something important. The woman looks up at him, her mouth slightly open as if she's about",
+    "vram_peak_mib": 18058.43994140625,
+    "elapsed_s": 8.40522069400322
+  },
+  "turboquant": {
+    "output_text": "In the video, there are three characters characters: a woman and two men. The woman is wearing a red jacket and has long brown hair. One of the men is wearing a green green-toned jacket with a purple shirt and and has short brown hair. The other man is wearing a green dark jacket with a purple shirt and has short brown brown hair. The woman is is holding a a black phone with an antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna antenna\n\nThe woman is holding a black phone with an antenna antenna antenna antenna antenna antennaantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantantant",
+    "vram_peak_mib": 18056.50244140625,
+    "elapsed_s": 19.734602320000704,
+    "compression_stats": {
+      "num_layers": 36,
+      "seq_len": 11652,
+      "batch_size": 1,
+      "num_heads": 8,
+      "head_dim": 128,
+      "bits": 3,
+      "compressed_mib": 844.8837890625,
+      "baseline_mib": 1638.5625,
+      "compression_ratio": 1.94,
+      "savings_mib": 793.6787109375
+    }
+  },
+  "comparison": {
+    "texts_identical": false,
+    "time_ratio": 2.348,
+    "vram_delta_mib": 1.9,
+    "baseline_text_preview": "The scene opens in a cozy, lived-in apartment with gray walls and a white door, where a woman with long, curly brown hair in a red jacket over a black shirt stands beside a man in a green jacket with ",
+    "turboquant_text_preview": "In the video, there are three characters characters: a woman and two men. The woman is wearing a red jacket and has long brown hair. One of the men is wearing a green green-toned jacket with a purple "
+  }
+}
