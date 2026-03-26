@@ -80,9 +80,22 @@ compressed = CompressedDynamicCache(cache, head_dim=128, bits=4)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) -- Implementation status, next steps, key lessons
 - [`experiments/logs/`](experiments/logs/) -- All 4 experiment logs with full results
 
+## Fused Triton Kernel (WIP)
+
+A custom Triton kernel fuses nibble unpacking, centroid lookup, and rotation (pre-rotation trick) into a single GPU pass, eliminating the dequantization bottleneck:
+
+| Metric | Result |
+|--------|--------|
+| Q@K^T micro-benchmark speedup | **17.8x** at 11K tokens |
+| Cosine similarity vs unfused reference | **1.0** (exact match) |
+| Single-layer Molmo2-4B integration | Correct output |
+| Multi-layer integration | WIP -- needs full Flash Attention-style fusion (fused softmax+V) |
+
+**Key finding:** A fused Q@K^T-only kernel does not maintain SDPA precision when composed across 36 layers. Full Flash Attention-style fusion (Q@K^T + softmax + @V in one kernel) is required for multi-layer correctness.
+
 ## Status
 
-**Pre-alpha.** The core algorithm and compressed cache are validated. The current bottleneck is decode throughput (3.36x overhead from full-cache dequantization every step). A [fused Triton attention kernel](docs/ROADMAP.md) would eliminate this overhead -- research and implementation plan are complete.
+**Pre-alpha / WIP.** The core algorithm and compressed cache are validated at 3.76x compression. The fused Triton kernel achieves 17.8x on the Q@K^T micro-benchmark with perfect cosine similarity, and single-layer integration on Molmo2-4B produces correct output. Multi-layer integration is in progress -- it requires full Flash Attention-style fusion (softmax+V) to maintain precision across all 36 layers.
 
 ## Reference
 

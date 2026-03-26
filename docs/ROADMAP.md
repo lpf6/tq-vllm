@@ -77,27 +77,36 @@ on consumer GPUs (RTX 4090, 24 GB VRAM) with Molmo2 vision-language models.
 
 ---
 
+## In Progress
+
+### P3: Triton fused dequant-attention kernel
+
+**Goal:** Fuse dequantization with attention computation to avoid materializing full decompressed tensors.
+
+**Why:** Current `CompressedDynamicCache` dequantizes the ENTIRE cache at every layer at every generation step (11K+ vectors through a 128x128 matrix multiply). This is the source of the 2.35x overhead.
+
+**Status:**
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Fused Q@K^T Triton kernel | **Done** | Nibble unpacking + pre-rotation trick in a single GPU pass |
+| Micro-benchmark (11K tokens) | **Done** | 17.8x speedup, 1.0 cosine similarity vs unfused reference |
+| Single-layer Molmo2-4B integration | **Done** | Produces correct output |
+| Multi-layer Molmo2 integration | **WIP** | Needs full Flash Attention-style fusion (softmax+V) |
+
+**Key finding:** A fused Q@K^T-only kernel does not match SDPA precision when composed across all 36 transformer layers. The error compounds layer-over-layer. Full Flash Attention-style fusion -- Q@K^T + softmax + @V in a single kernel -- is required for multi-layer correctness.
+
+---
+
 ## Future Work
 
-### P3: Molmo2-8B validation
+### P4: Molmo2-8B validation
 
 **Goal:** Confirm CompressedDynamicCache works with the larger model. The 8B model recognizes character names (e.g., "Elaine", "Kramer") which 4B cannot.
 
 **Approach:** Run benchmark with `--model allenai/Molmo2-8B --compressed`. May need `bitsandbytes` 4-bit weight quantization to fit model + compressed cache in 24 GB.
 
-**When:** After TQ4 nibble packing is validated on 4B. Using 4B for experiments is faster to set up and tear down.
-
-### P4: Triton fused dequant-attention kernel
-
-**Goal:** Fuse dequantization with attention computation to avoid materializing full decompressed tensors.
-
-**Why:** Current `CompressedDynamicCache` dequantizes the ENTIRE cache at every layer at every generation step (11K+ vectors through a 128x128 matrix multiply). This is the source of the 2.35x overhead. A fused kernel would:
-1. Read nibble-packed indices + fp32 norms directly
-2. Compute centroid lookup + rotation + scaling inline
-3. Compute Q @ K^T without materializing the full K tensor
-4. Reduce both latency AND peak VRAM
-
-**Complexity:** Medium-high. Requires Triton kernel development and correctness validation.
+**When:** After Triton kernel integration is complete. The fused kernel eliminates the decode overhead that would otherwise dominate 8B benchmarks.
 
 ### P5: TQ3 bit-packing (research, nice-to-have)
 

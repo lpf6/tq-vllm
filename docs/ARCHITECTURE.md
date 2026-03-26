@@ -33,21 +33,35 @@ flowchart TD
         CompressedDynamicCache`"]
     end
 
+    subgraph triton ["Triton Kernels (WIP)"]
+        direction LR
+        TI["`**triton/__init__.py**
+        Package init`"]
+        TK["`**triton/fused_qk_attention.py**
+        Fused Q@K^T kernel`"]
+        TM["`**triton/molmo2_integration.py**
+        Molmo2 attention override`"]
+    end
+
     subgraph bench ["Benchmark Harness"]
         BM["`**benchmark.py**
         Molmo2 inference A/B testing`"]
     end
 
-    API -.-> LM & QZ & CP & KV
+    API -.-> LM & QZ & CP & KV & TK & TM
     QZ --> LM
     CP --> QZ
     KV --> CP
+    TM --> QZ
+    TM --> TK
     BM --> KV
 
     classDef layer fill:#1a1a2e,color:#eee,stroke:#333
     classDef apiNode fill:#0f4c75,color:#fff,stroke:#0f4c75
+    classDef tritonNode fill:#c0392b,color:#fff,stroke:#c0392b
     class API apiNode
     class LM,QZ,CP,KV,BM layer
+    class TI,TK,TM tritonNode
 ```
 
 ---
@@ -63,15 +77,19 @@ flowchart LR
     QZ ==>|imported by| CP([compressors]):::wrap
     CP ==>|imported by| KV([kv_cache]):::integ
     KV ==>|imported by| BM([benchmark]):::cli
+    TK([triton/fused_qk_attention]):::triton
+    QZ ==>|imported by| TM([triton/molmo2_integration]):::triton
+    TK ==>|imported by| TM
 
     classDef math  fill:#16a085,color:#fff,stroke:#16a085
     classDef algo  fill:#2980b9,color:#fff,stroke:#2980b9
     classDef wrap  fill:#8e44ad,color:#fff,stroke:#8e44ad
     classDef integ fill:#d35400,color:#fff,stroke:#d35400
     classDef cli   fill:#7f8c8d,color:#fff,stroke:#7f8c8d
+    classDef triton fill:#c0392b,color:#fff,stroke:#c0392b
 ```
 
-No circular dependencies — the graph is a strict DAG from foundational math (`lloyd_max`) up through integration (`kv_cache`) and finally the CLI harness (`benchmark`).
+No circular dependencies — the graph is a strict DAG from foundational math (`lloyd_max`) up through integration (`kv_cache`) and the CLI harness (`benchmark`). The `triton/` module is a parallel branch: `fused_qk_attention` is standalone (no internal dependencies), and `molmo2_integration` depends on both `quantizer` (for rotation matrices) and `fused_qk_attention` (for the fused kernel).
 
 ---
 
