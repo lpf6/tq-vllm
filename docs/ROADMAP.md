@@ -144,14 +144,14 @@ podman run --rm \
   docker.io/rocm/pytorch:rocm7.1_ubuntu24.04_py3.12_pytorch_release_2.8.0
 ```
 
-#### Phase 1 — Dev Environment
+#### Phase 1 — Dev Environment (IN PROGRESS)
 
-| Step | Action | Depends On |
-|------|--------|-----------|
-| 1.1 | Create `Containerfile` for dev environment (ROCm + project deps) | Phase 0 |
-| 1.2 | Mount project sources as volumes | 1.1 |
-| 1.3 | Add cross-device validation test fixtures (CPU vs GPU) | 1.1 |
-| 1.4 | Verify `uv sync` works inside container with ROCm PyTorch | 1.1 |
+| Step | Action | Result |
+|------|--------|--------|
+| 1.1 | Create `Containerfile` for dev environment (ROCm + project deps) | ✅ `infra/Containerfile.rocm` + `infra/run-rocm.sh` |
+| 1.2 | Mount project sources as volumes | ✅ Handled by `run-rocm.sh` (+ HF cache mount) |
+| 1.3 | Add cross-device validation test fixtures (CPU vs GPU) | **Next** — parametrize existing tests with `device=["cpu", "cuda"]` |
+| 1.4 | Verify `uv sync` works inside container with ROCm PyTorch | Not started |
 
 #### Phase 2 — Core Algorithm on AMD
 
