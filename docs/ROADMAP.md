@@ -161,15 +161,28 @@ Implementation: Added `device` fixture in `conftest.py` parametrized with `["cpu
 
 Validated inside ROCm container on Radeon 890M (gfx1150): **84/84 tests passed** with no tolerance relaxation — all existing `atol`, cosine similarity, and correlation thresholds hold on AMD GPU.
 
-#### Phase 2 — Core Algorithm on AMD
+#### Phase 2 — Core Algorithm on AMD (IN PROGRESS)
 
-| Work Stream | GPU Required? | Priority |
-|------------|--------------|----------|
-| Improve codebook solver convergence | No | High |
-| Extend test coverage beyond 85% | No | High |
-| Add support for additional bit widths (2-bit, 5-bit) | No | Medium |
-| Benchmark CompressedDynamicCache API ergonomics | No | Medium |
-| Explore `torch.compile(mode="default")` on ROCm | Yes | Medium |
+**Session 1 — Quick wins (gates Phase 3):**
+
+| Step | Action | GPU? | Status |
+|------|--------|------|--------|
+| 2.1 | `torch.compile(mode="default")` spike on ROCm | Yes | **Next** — pass/fail determines Phase 3 feasibility |
+| 2.2 | KV cache test parametrization — add `device` fixture to `test_kv_cache.py` (basic update, nibble packing, VRAM savings) | Yes | Not started |
+
+**Session 2 — Coverage & hardening:**
+
+| Step | Action | GPU? | Status |
+|------|--------|------|--------|
+| 2.3 | Push test coverage above 90% — identify uncovered paths | No | Not started |
+| 2.4 | Codebook solver convergence — check edge cases (low/high dims, extreme bit widths) | No | Not started |
+
+**Session 3 — Optional research:**
+
+| Step | Action | GPU? | Status |
+|------|--------|------|--------|
+| 2.5 | 2-bit and 5-bit support — extend `solve_lloyd_max` and tests | No | Not started |
+| 2.6 | CompressedDynamicCache API ergonomics review | No | Not started |
 
 #### Phase 3 — End-to-End Validation (if GPU works)
 
