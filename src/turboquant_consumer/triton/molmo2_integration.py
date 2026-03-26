@@ -41,10 +41,12 @@ from turboquant_consumer.triton.fused_qk_attention import fused_qk_scores
 
 
 class CompressedKVStore(DynamicCache):
-    """KV store with compressed keys and fp16 values.
+    """KV store with compressed keys and standard values.
 
-    Keys are stored as nibble-packed uint8 indices + fp32 norms.
-    Values are stored as standard fp16/bf16 tensors.
+    Keys are compressed into nibble-packed uint8 indices + fp32 norms
+    in side storage for the fused Triton kernel. Values and all
+    DynamicLayer bookkeeping are managed by the base ``DynamicCache``
+    via the overridden ``update()`` method.
 
     This cache is passed as ``past_key_values`` to ``model.generate()``.
 
@@ -75,27 +77,40 @@ class CompressedKVStore(DynamicCache):
 
         self._packed_indices: list[torch.Tensor | None] = []
         self._norms: list[torch.Tensor | None] = []
-        self._values: list[torch.Tensor | None] = []
 
-    def compress_and_store_key(self, key_states: torch.Tensor, layer_idx: int) -> None:
-        """Compress key states to nibble-packed indices + norms and store them.
+    def update(
+        self,
+        key_states: torch.Tensor,
+        value_states: torch.Tensor,
+        layer_idx: int,
+        cache_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compress keys on write, store values normally via DynamicCache.
+
+        Overrides ``DynamicCache.update()`` to intercept key storage.
+        Keys are nibble-packed into compressed side storage for the
+        fused Triton kernel. Values and all ``DynamicLayer`` bookkeeping
+        (seq_length, layer creation, offloading) are handled by the
+        base class, keeping ``model.generate()`` happy.
 
         Args:
             key_states: Key tensor, shape
                 ``(batch, n_kv_heads, seq_len, head_dim)``.
+            value_states: Value tensor, same shape as key_states.
             layer_idx: Transformer layer index.
+            cache_kwargs: Additional cache arguments (passed to base).
+
+        Returns:
+            Tuple of (full_keys, full_values) from the base class.
+            The returned keys are uncompressed (for compatibility);
+            the fused kernel reads from compressed side storage instead.
         """
-        # Quantize (rotation matrix moves to key device automatically)
+        # 1. Compress keys into side storage
         indices, norms = self.quantizer.quantize(key_states.float())
         indices = indices.to(torch.uint8)
-        norms = norms.float()
-
-        # Nibble pack: two 4-bit indices per byte
         packed = (indices[..., 0::2] << 4) | indices[..., 1::2]
-        # Squeeze norm last dim: (B, H, S, 1) -> (B, H, S)
-        norms = norms.squeeze(-1)
+        norms = norms.float().squeeze(-1)
 
-        # Extend storage
         while len(self._packed_indices) <= layer_idx:
             self._packed_indices.append(None)
             self._norms.append(None)
@@ -109,23 +124,9 @@ class CompressedKVStore(DynamicCache):
             )
             self._norms[layer_idx] = torch.cat([self._norms[layer_idx], norms], dim=2)
 
-    def store_value(self, value_states: torch.Tensor, layer_idx: int) -> None:
-        """Store value states uncompressed in fp16/bf16.
-
-        Args:
-            value_states: Value tensor, shape
-                ``(batch, n_kv_heads, seq_len, head_dim)``.
-            layer_idx: Transformer layer index.
-        """
-        while len(self._values) <= layer_idx:
-            self._values.append(None)
-
-        if self._values[layer_idx] is None:
-            self._values[layer_idx] = value_states
-        else:
-            self._values[layer_idx] = torch.cat(
-                [self._values[layer_idx], value_states], dim=2
-            )
+        # 2. Let DynamicCache handle values + DynamicLayer bookkeeping.
+        #    Keys are passed through for seq_length tracking.
+        return super().update(key_states, value_states, layer_idx, cache_kwargs)
 
     def get_compressed_key(self, layer_idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Return compressed key data for a layer.
@@ -137,30 +138,6 @@ class CompressedKVStore(DynamicCache):
             Tuple of (packed_indices, norms).
         """
         return self._packed_indices[layer_idx], self._norms[layer_idx]
-
-    def get_values(self, layer_idx: int) -> torch.Tensor:
-        """Get accumulated values for a layer.
-
-        Args:
-            layer_idx: Transformer layer index.
-
-        Returns:
-            Value tensor with all cached tokens.
-        """
-        return self._values[layer_idx]
-
-    def get_seq_length(self, layer_idx: int = 0) -> int:
-        """Return cached sequence length.
-
-        Args:
-            layer_idx: Layer to query.
-
-        Returns:
-            Number of cached tokens.
-        """
-        if layer_idx < len(self._norms) and self._norms[layer_idx] is not None:
-            return self._norms[layer_idx].shape[2]
-        return 0
 
 
 def _apply_rotary_pos_emb(
@@ -261,7 +238,8 @@ def _make_fused_forward(
         """Fused TurboQuant attention forward for Molmo2.
 
         Replaces the standard Q @ K^T with a Triton kernel that reads
-        nibble-packed 4-bit key indices directly.
+        nibble-packed 4-bit key indices directly. Cache bookkeeping is
+        handled by ``store.update()`` (DynamicCache base class).
 
         Args:
             hidden_states: Input tensor.
@@ -309,25 +287,29 @@ def _make_fused_forward(
             query_states, key_states, cos, sin
         )
 
-        # --- Compressed key storage ---
-        store.compress_and_store_key(key_states, layer_idx)
-        store.store_value(value_states, layer_idx)
-
-        # Maintain DynamicCache layer count for generate() compatibility.
-        # layer.keys must reflect FULL seq length for position ID tracking.
-        while len(store.layers) <= layer_idx:
-            store.layers.append(store.layer_class_to_replicate())
-        layer = store.layers[layer_idx]
-        if not layer.is_initialized:
-            layer.lazy_initialization(key_states)
-        full_values = store.get_values(layer_idx)
-        layer.keys = full_values  # same seq dim as full cache
-        layer.values = full_values
+        # --- Cache update: compress keys + store values via DynamicCache ---
+        # store.update() overrides DynamicCache.update() to compress keys
+        # into side storage while letting the base class handle values
+        # and all DynamicLayer bookkeeping (seq_length, layer creation).
+        cache_kwargs = {
+            "sin": sin,
+            "cos": cos,
+            "cache_position": cache_position,
+        }
+        _, full_values = store.update(key_states, value_states, layer_idx, cache_kwargs)
 
         # --- Fused attention scores ---
         # Pre-rotate query: q_rot = Q @ rotation_T
+        # Use model dtype (bf16) for pre-rotation to match the precision
+        # behavior of the unfused bf16 attention path. fp32 pre-rotation
+        # produces scores that compound differently across 36 layers.
         device = query_states.device
-        q_rot = query_states.float() @ rotation_T.to(device).unsqueeze(0).unsqueeze(0)
+        q_rot = (
+            query_states
+            @ rotation_T.to(device=device, dtype=query_states.dtype)
+            .unsqueeze(0)
+            .unsqueeze(0)
+        ).float()
 
         # Get compressed keys for this layer
         packed_indices, norms = store.get_compressed_key(layer_idx)
