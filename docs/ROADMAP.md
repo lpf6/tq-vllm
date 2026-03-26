@@ -181,8 +181,8 @@ Validated inside ROCm container on Radeon 890M (gfx1150): **84/84 tests passed**
 
 | Step | Action | GPU? | Status |
 |------|--------|------|--------|
-| 2.5 | 2-bit and 5-bit support — extend `solve_lloyd_max` and tests | No | Not started |
-| 2.6 | CompressedDynamicCache API ergonomics review | No | Not started |
+| 2.5 | 2-bit and 5-bit support — extend `solve_lloyd_max` and tests | No | ✅ Code already generic; added tests for bits 2-5 across quantizer, codebook, and KV cache |
+| 2.6 | CompressedDynamicCache API ergonomics review | No | ✅ API is clean — consistent constructors, well-structured exports, no sharp edges |
 
 #### Phase 3 — End-to-End Validation (if GPU works)
 

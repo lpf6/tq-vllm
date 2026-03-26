@@ -56,16 +56,17 @@ class TestTurboQuantMSE:
         x = x / torch.norm(x, dim=-1, keepdim=True)
 
         mse_values = []
-        for bits in (2, 3, 4):
+        for bits in (2, 3, 4, 5):
             q = TurboQuantMSE(DIM, bits)
             indices, norms = q.quantize(x)
             reconstructed = q.dequantize(indices, norms)
             mse = ((x - reconstructed) ** 2).mean().item()
             mse_values.append(mse)
 
-        assert mse_values[0] > mse_values[1] > mse_values[2], (
-            f"MSE should decrease with more bits: {mse_values}"
-        )
+        for i in range(len(mse_values) - 1):
+            assert mse_values[i] > mse_values[i + 1], (
+                f"MSE should decrease with more bits: {mse_values}"
+            )
 
     def test_zero_vector(
         self, mse_quantizer: TurboQuantMSE, device: torch.device

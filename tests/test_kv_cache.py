@@ -404,6 +404,60 @@ class TestCompressedDynamicCache:
         assert len(cc._compressed_keys) == 2
 
 
+@pytest.mark.unit
+class TestBitWidthSupport:
+    """Validate CompressedDynamicCache at non-default bit widths."""
+
+    @pytest.mark.parametrize("bits", [2, 5])
+    def test_compress_decompress_quality(self, bits: int) -> None:
+        """2-bit and 5-bit should produce valid output with expected quality ordering."""
+        from transformers import DynamicCache
+
+        cache = DynamicCache()
+        _ = CompressedDynamicCache(cache, head_dim=DIM, bits=bits)
+
+        keys = torch.randn(1, 4, 32, DIM)
+        values = torch.randn(1, 4, 32, DIM)
+        out_k, out_v = cache.update(keys, values, layer_idx=0)
+
+        assert out_k.shape == keys.shape
+        cos = torch.nn.functional.cosine_similarity(
+            keys.flatten(), out_k.flatten(), dim=0
+        )
+        if bits == 2:
+            # 4 quantization levels — coarse, flattened cosine varies with data
+            assert cos > 0.75, f"2-bit cosine {cos:.4f} too low"
+        else:
+            # 32 levels — near-lossless per-vector but flattened cosine is noisier
+            assert cos > 0.90, f"5-bit cosine {cos:.4f} too low"
+
+    def test_5bit_better_quality_than_3bit(self) -> None:
+        """5-bit (32 levels) should beat 3-bit (8 levels) in reconstruction."""
+        from transformers import DynamicCache
+
+        original = torch.randn(1, 4, 50, DIM)
+
+        cache3 = DynamicCache()
+        _ = CompressedDynamicCache(cache3, head_dim=DIM, bits=3)
+        out3, _ = cache3.update(
+            original.clone(), torch.randn(1, 4, 50, DIM), layer_idx=0
+        )
+
+        cache5 = DynamicCache()
+        _ = CompressedDynamicCache(cache5, head_dim=DIM, bits=5)
+        out5, _ = cache5.update(
+            original.clone(), torch.randn(1, 4, 50, DIM), layer_idx=0
+        )
+
+        cos3 = torch.nn.functional.cosine_similarity(
+            original.flatten(), out3.flatten(), dim=0
+        )
+        cos5 = torch.nn.functional.cosine_similarity(
+            original.flatten(), out5.flatten(), dim=0
+        )
+        assert cos5 > cos3, f"5-bit ({cos5:.4f}) should beat 3-bit ({cos3:.4f})"
+
+
 BITS_4 = 4
 
 

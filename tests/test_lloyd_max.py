@@ -24,7 +24,7 @@ class TestLloydMaxCodebook:
         """Centroids should be approximately symmetric around zero."""
         assert abs(codebook_3bit.centroids.mean().item()) < 1e-4
 
-    @pytest.mark.parametrize("bits", [2, 3, 4])
+    @pytest.mark.parametrize("bits", [2, 3, 4, 5])
     def test_correct_number_of_levels(self, bits: int) -> None:
         """2^bits centroids and 2^bits - 1 boundaries."""
         centroids, boundaries = solve_lloyd_max(DIM, bits)
