@@ -43,48 +43,36 @@ on consumer GPUs (RTX 4090, 24 GB VRAM) with Molmo2 vision-language models.
 
 ---
 
-## Next Up
-
 ### P1: Long-sequence regression test
 
-**Goal:** Catch precision bugs like the fp16 norms issue in CI, without needing a GPU or real model.
-
-**Approach:** Synthetic test that creates a multi-layer cache (e.g., 36 layers, 1000+ tokens), compresses/decompresses, and verifies that the accumulated error doesn't exceed a threshold. Compare `CompressedDynamicCache` output vs `TurboQuantKVCache` output across many layers.
+| Component | Status | Tests | Notes |
+|-----------|--------|-------|-------|
+| Multi-layer precision test | Done | 4 | 36 layers, 1024 prefill + 32 gen steps, >0.999 cosine sim |
+| TQ4 regression at scale | Done | 1 | Same scale test for 4-bit nibble-packed path |
 
 ### P2: TQ4 nibble packing (3.76x compression)
 
-**Goal:** Switch from TQ3 (3-bit, uint8) to TQ4 (4-bit, nibble-packed) for nearly 2x better compression with *better* quality and trivial packing logic.
+| Component | Status | Tests | Notes |
+|-----------|--------|-------|-------|
+| `_nibble_pack` / `_nibble_unpack` | Done | 1 | Bit-shift pack/unpack, exact round-trip verified |
+| `CompressedDynamicCache` bits=4 | Done | 7 | Auto-enabled at bits=4, transparent to callers |
+| `_CompressedLayer.packed` flag | Done | — | Tracks packing format through cat/stats |
 
-**Why TQ4 over TQ3 packing:**
+### Compression Summary
 
-| Config | Bytes/block (128 indices) | Compression | Quality | Packing Complexity |
-|--------|--------------------------|-------------|---------|-------------------|
-| TQ3 uint8 (current) | 132 | 1.94x | ~95% cosine sim | None |
-| **TQ4 nibble-packed** | **68** | **3.76x** | **~97% cosine sim** | **Trivial** |
-| TQ3 bit-packed | 52 | 4.92x | ~95% cosine sim | Hard (3-bit byte-crossing) |
-
-TQ4 nibble packing wins on every axis that matters right now:
-- **Better quality** — 16 centroids vs 8, ~97% vs ~95% cosine similarity
-- **Nearly 2x better compression** — 3.76x vs 1.94x
-- **Trivial packing** — `(a << 4) | b` to pack, `>> 4` and `& 0xF` to unpack
-- **No Triton kernel needed** — pure PyTorch bit-shift ops
-
-3-bit packing is genuinely hard (bits cross byte boundaries) and no PyTorch/Triton implementation exists. The only working 3-bit packer is in C/CUDA (ik_llama.cpp). The extra 30% compression (4.92x vs 3.76x) isn't worth a Triton kernel at this stage.
-
-**Research backing:**
-- PyTorch `torch.uint1`-`torch.uint7` are placeholder dtypes only — no ops
-- TorchAO has int4 packing but it's weight-quant-specific, not reusable
-- Every Python TurboQuant implementation (Dejan.ai, tonbistudio) uses wasteful uint8
-- The ik_llama.cpp 3-bit layout (52 bytes/block) is the gold standard but C-only
-
-**Approach:** Add `--bits 4` support to `CompressedDynamicCache` with nibble-packed uint8 storage. Pack pairs of 4-bit indices into single bytes. The Lloyd-Max solver already supports arbitrary bit widths.
+| Mode | Bytes/block | Compression | Quality | Status |
+|------|-------------|-------------|---------|--------|
+| FP16 baseline | 256 | 1.0x | — | — |
+| TQ3 uint8 | 132 | 1.94x | ~95% cosine | Done |
+| **TQ4 nibble** | **68** | **3.76x** | **~97% cosine** | **Done** |
+| TQ3 bit-packed | 52 | 4.92x | ~95% cosine | Deferred (P5) |
 
 **Projected VRAM for Molmo2-4B (36 layers, 8 KV heads, 11K tokens):**
 
 | Mode | KV Cache Size | Savings vs FP16 |
 |------|--------------|-----------------|
 | FP16 baseline | 1,639 MiB | — |
-| TQ3 uint8 (current) | 845 MiB | 794 MiB (1.94x) |
+| TQ3 uint8 | 845 MiB | 794 MiB (1.94x) |
 | **TQ4 nibble** | **436 MiB** | **1,203 MiB (3.76x)** |
 
 ---

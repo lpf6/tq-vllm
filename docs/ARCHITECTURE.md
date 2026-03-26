@@ -287,21 +287,39 @@ flowchart TD
     classDef good fill:#16a085,color:#fff,stroke:#16a085
 ```
 
-**Memory model** (CompressedDynamicCache, 3-bit, head_dim=128):
+**Memory model** (CompressedDynamicCache, head_dim=128):
+
+**TQ3 (3-bit, unpacked) — 132 bytes, 1.94x compression:**
 
 ```mermaid
 ---
-title: "Compressed storage per token per head (132 B vs 256 B FP16 baseline)"
+title: "TQ3: 132 B per token per head"
 ---
 packet-beta
   0-127: "uint8 indices (128 B) — one per head_dim coordinate"
   128-131: "fp32 norm (4 B)"
 ```
 
+**TQ4 (4-bit, nibble-packed) — 68 bytes, 3.76x compression:**
+
+```mermaid
+---
+title: "TQ4: 68 B per token per head"
+---
+packet-beta
+  0-63: "nibble-packed uint8 (64 B) — two 4-bit indices per byte"
+  64-67: "fp32 norm (4 B)"
+```
+
+> **Why TQ4 over TQ3 packing?** TQ4 nibble packing is trivial (`(a << 4) | b`)
+> and gives 3.76x compression with ~97% cosine similarity. TQ3 bit-packing (3-bit
+> values crossing byte boundaries) is hard — no PyTorch/Triton implementation exists.
+> The 30% extra compression isn't worth a custom kernel at this stage.
+
 > **Why fp32 norms?** fp16 norms caused garbled output at 10K+ token sequences.
 > The 0.01% per-vector precision loss accumulated across 36 transformer layers,
 > flipping low-confidence token predictions. The 2 extra bytes per vector are
-> negligible (1.94x vs 1.97x compression).
+> negligible.
 
 ```mermaid
 sequenceDiagram
@@ -413,8 +431,12 @@ flowchart TD
     ==> LM["Lloyd-Max quantize
     torch.bucketize on boundaries"]
     ==> IDX["uint8 indices"]
-    ==> STORE[("`**Compressed storage**
-    uint8 indices + fp32 norms`")]:::store
+    ==> PACK{"bits=4?"}
+    PACK -- Yes --> NIB["Nibble pack (2 per byte)"]
+    PACK -- No --> RAW["Store as uint8"]
+    NIB ==> STORE[("`**Compressed storage**
+    packed/uint8 indices + fp32 norms`")]:::store
+    RAW ==> STORE
 
     STORE ==> LOOKUP["Centroid lookup  centroids#91;indices#93;"]
     ==> INVROT["Inverse rotation Πᵀ"]
@@ -443,8 +465,8 @@ quadrantChart
     quadrant-4 Memory focus
     FP16 Baseline: [0.05, 0.95]
     TurboQuantKVCache (accuracy-only): [0.10, 0.78]
-    CompressedDynamicCache (3-bit): [0.80, 0.75]
-    CompressedDynamicCache (2-bit): [0.88, 0.55]
+    CompressedDynamicCache TQ3: [0.55, 0.75]
+    CompressedDynamicCache TQ4 nibble: [0.78, 0.82]
 ```
 
 ---
@@ -454,6 +476,8 @@ quadrantChart
 | Decision | Rationale |
 |---|---|
 | **MSE-only for drop-in mode** | Standard attention does `Q @ K.T` on decompressed keys, so QJL correction bits are wasted. Full 3-bit MSE gives ~95% cosine similarity vs ~87% with 2-bit MSE + 1-bit QJL. |
+| **TQ4 nibble packing over TQ3 bit-packing** | 4-bit indices pack trivially (2 per byte via bit-shift). 3-bit indices cross byte boundaries — no PyTorch/Triton implementation exists. TQ4 gives 3.76x compression with ~97% quality vs TQ3's 4.92x at ~95%. The 30% gap isn't worth a custom kernel. |
+| **fp32 norms, not fp16** | fp16 norm precision loss compounds across 36 transformer layers, flipping low-confidence logits at 10K+ token sequences. fp32 costs only 2 extra bytes per vector (1.94x → 1.94x for TQ3, negligible for TQ4). |
 | **Non-invasive monkey-patching** | Avoids subclassing `DynamicCache`, which is fragile across `transformers` versions. The wrapper saves and restores the original method. |
 | **`@lru_cache` on Lloyd-Max** | A 32-layer model creates 64 compressors (K+V). Without caching, `scipy.integrate.quad` would run for 2+ minutes at init. |
 | **Lazy one-layer decompression** | `CompressedDynamicCache` frees the previous layer's FP32 tensors when the next layer updates, keeping peak VRAM to one decompressed layer at a time. |
