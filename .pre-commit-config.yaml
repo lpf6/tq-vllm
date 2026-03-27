@@ -20,7 +20,6 @@ repos:
     rev: 0.17.0
     hooks:
       - id: uv-secure
-        args: [--ignore-vulns, "GHSA-5239-wwwm-4pmq"]  # Pygments — no fix available yet
 
   - repo: local
     hooks:

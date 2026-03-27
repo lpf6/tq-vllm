@@ -99,7 +99,9 @@ on consumer GPUs (RTX 4090, 24 GB VRAM) with Molmo2 vision-language models.
 | AMD ROCm validation | **Done** | Triton HIP backend, 1.0 cosine, 0.31 ms/call on 890M (experiment 008) |
 | Multi-layer integration | **Blocked** | Needs Flash Attention-style fusion (see below) |
 
-**Key finding:** A fused Q@K^T-only kernel does not match SDPA precision when composed across all 36 transformer layers. The fp32 kernel scores differ from bf16 SDPA scores by 0.023 cosine per layer, which compounds into degenerate output. Full Flash Attention-style fusion (Q@K^T + online softmax + V matmul in one kernel) is required for multi-layer correctness. This is a 1-2 week project using the Triton Flash Attention tutorial as scaffold.
+**Key finding:** A fused Q@K^T-only kernel does not match SDPA precision when composed across all 36 transformer layers. The fp32 kernel scores differ from bf16 SDPA scores by 0.023 cosine per layer, which compounds to 0.43 over 36 layers — degenerate output. Root cause: the Q@K^T-only approach materializes attention scores in fp16 at two intermediate points, causing error multiplication. Full Flash Attention-style fusion (Q@K^T + online softmax + V matmul in one kernel, fp32 accumulation throughout) is required for multi-layer correctness. See P5 for the implementation roadmap.
+
+**Research:** See `molmo-video-analyzer/_bmad-output/planning-artifacts/research/technical-flash-attention-fusion-turboquant-kv-cache-research-2026-03-26.md` for the detailed analysis that quantified this drift and identified the full FA fusion solution.
 
 **Cross-platform:** The Triton kernel works on both NVIDIA (CUDA) and AMD (ROCm/HIP) with zero code changes. The multi-layer precision issue is platform-independent — P5 fix applies to both.
 
@@ -107,7 +109,7 @@ on consumer GPUs (RTX 4090, 24 GB VRAM) with Molmo2 vision-language models.
 
 ## Future Work
 
-### P7: AMD ROCm platform support (Radeon 890M / gfx1150)
+### P8: AMD ROCm platform support (Radeon 890M / gfx1150)
 
 **Goal:** Enable TurboQuant development and validation on AMD integrated GPUs, starting with Radeon 890M (RDNA 3.5, gfx1150) on a Ryzen AI 9 HX 370 laptop running Bazzite (immutable Fedora).
 
@@ -245,15 +247,113 @@ Phase 0 Smoke Test
 
 **When:** After P3 (incremental dequant) eliminates the decode overhead.
 
-### P5: Flash Attention-style fused kernel (research)
+### P5: Fused TQ4 Flash Attention kernel
 
-**Goal:** Fuse the full attention computation (Q@K^T + online softmax + V matmul) into a single Triton kernel that reads nibble-packed indices directly.
+**Goal:** Fuse the full attention computation (Q@K^T + online softmax + V matmul) into a single Triton kernel that reads nibble-packed TQ4 indices directly — never materializing decompressed keys or the attention score matrix in fp16.
 
-**Why:** The P3b Q@K^T-only kernel achieves 17.8x on the micro-benchmark but can't maintain SDPA precision across 36 layers. A full Flash Attention-style kernel would match SDPA's online softmax behavior while reading compressed keys.
+**Why:** The P3b Q@K^T-only kernel achieves 17.8x on the micro-benchmark but can't maintain SDPA precision across 36 layers (0.023 cosine loss/layer → 0.43 over 36 layers). The root cause is two fp16 materialization points: scores after Q@K^T and weights after softmax. Full Flash Attention fusion eliminates both by maintaining the `(m_i, l_i, acc)` state machine entirely in fp32, casting only the final output to fp16. The correction factor `alpha = exp2(m_old - m_new)` is mathematically exact, not approximate.
 
-**Complexity:** 1-2 weeks. Use the Triton Flash Attention tutorial as scaffold, inject centroid gather + nibble unpack into the inner tile loop.
+**Expected precision:** >0.998 per-layer cosine similarity (vs 0.977 with Q@K^T-only), >0.93 over 36 layers (vs 0.43).
 
 **Platform:** Triton HIP backend confirmed working for the Q@K^T kernel (experiment 008), so P5 should also work cross-platform (NVIDIA + AMD ROCm).
+
+**Key architectural insight (arXiv 2511.11581):** GQA Q-Block pattern flattens multiple query heads sharing a KV head into a single 2D tensor. For Molmo2's 28Q/4KV (7:1 ratio): 7 Q-heads per block → BLOCK_M=8 (padded from 7). This avoids per-head loops and maps cleanly to Triton's tile-based programming model.
+
+**Survey of existing systems (13 reviewed):** KIVI, BitDecoding, Kitty, INT-FlashAttention, QServe, FlashInfer, etc. — none fuse vector quantization codebook lookup with Flash Attention. This would be novel.
+
+#### Phase 1: Vanilla Triton FA baseline (1-2 days)
+
+| Step | Action | Validation |
+|------|--------|------------|
+| 1.1 | Fork Triton tutorial FA kernel, forward-only fp16/bf16 | Unit test output vs SDPA |
+| 1.2 | Add GQA Q-Block: flatten 7 query heads into BLOCK_M=8 | Per-layer cosine >0.999 vs SDPA |
+| 1.3 | Register via HuggingFace `AttentionInterface.register()` | End-to-end Molmo2-4B text match |
+| 1.4 | Autotune for RTX 4090: BLOCK_M∈{64,128}, BLOCK_N∈{32,64,128}, stages∈{2,3,4} | Throughput ≥ SDPA baseline |
+
+#### Phase 2: TQ4 K-only fusion (2-3 days)
+
+| Step | Action | Validation |
+|------|--------|------------|
+| 2.1 | Add pre-rotation outside kernel: `q_rot = query @ Pi_T` | Rotation correctness test |
+| 2.2 | Replace K tile load: nibble unpack → centroid gather → norm scale | Single-tile output vs standard |
+| 2.3 | Keep V as standard fp16 (uncompressed) | Per-layer cosine >0.998 |
+| 2.4 | Benchmark decode throughput | >15 tok/s target |
+
+**TQ4 decompression in inner loop:**
+```
+# Replaces: k_tile = desc_k.load()
+packed = tl.load(k_packed_ptr)          # uint8 nibble-packed
+hi = packed >> 4                         # upper 4-bit index
+lo = packed & 0x0F                       # lower 4-bit index
+k_vals = tl.load(centroids_ptr + indices) # centroid gather
+k_tile = k_vals * tl.load(norms_ptr)     # norm scale
+```
+
+#### Phase 3: TQ4 K+V fusion (1-2 days)
+
+| Step | Action | Validation |
+|------|--------|------------|
+| 3.1 | Add V tile decompression (separate codebooks from K) | Same nibble unpack + centroid gather |
+| 3.2 | Validate full compressed path | Per-layer >0.998, 36-layer >0.93 cosine |
+| 3.3 | Bandwidth measurement | <6 MB/layer (vs ~25 MB unfused) |
+| 3.4 | Benchmark decode throughput | >25 tok/s target |
+
+#### Phase 4: Production hardening (1-2 days)
+
+| Step | Action | Validation |
+|------|--------|------------|
+| 4.1 | Prefill kernel variant (BLOCK_M=64) | Correct output on long prefills |
+| 4.2 | Variable sequence length support | Edge cases: empty cache, max seq |
+| 4.3 | `torch.compile` registration | No graph breaks |
+| 4.4 | Regression test suite (3 tiers) | Unit + per-layer + end-to-end |
+
+#### Projected performance (RTX 4090)
+
+| Metric | Current (unfused) | Phase 2 (K-only) | Phase 3 (K+V) | Improvement |
+|--------|-------------------|-------------------|---------------|-------------|
+| Decode tok/s | 8.9 | 15-20 | 25-35 | 2.8-3.9x |
+| Memory traffic/layer | ~25 MB | ~6 MB | ~3-6 MB | 4-8x less |
+| Overhead vs baseline | 1.78x slower | ~1.1x | 0.85-1.1x | Near parity |
+
+#### RTX 4090 resource budget
+
+| Resource | Budget | Notes |
+|----------|--------|-------|
+| Memory bandwidth | 1008 GB/s | Target >500 GB/s achieved (50%+) |
+| Shared memory | 128 KB/SM | Design <64 KB/block for 2 concurrent blocks |
+| Registers | <128/thread | 4 warps with good occupancy |
+| Occupancy | >50% | Sufficient for memory-bound kernel |
+
+#### Success criteria
+
+- Per-layer cosine similarity: >0.998 (match FA-level precision)
+- 36-layer composition: >0.93 (residual connections stabilize)
+- Decode tokens/sec: >15 (Phase 2), >25 (Phase 3)
+- Text output: matches reference (decisive gate)
+- KV cache VRAM: unchanged (3.76x compression preserved)
+
+#### Testing strategy (3 tiers)
+
+1. **Unit (fast):** Nibble unpack, centroid gather, single-tile attention vs standard
+2. **Per-layer (medium):** Each of 36 layers >0.998 cosine similarity vs SDPA
+3. **End-to-end (slow):** Full Molmo2 inference >0.93 cosine, text output identical
+
+#### Prerequisites
+
+- Triton ≥3.0 (available via `torch.triton`)
+- HuggingFace transformers ≥4.50 (`AttentionInterface` API)
+- Molmo2-4B weights (cached locally)
+- RTX 4090 GPU
+- CompressedDynamicCache (Layer 2b — done)
+- Nsight Compute (profiling)
+
+#### Research references
+
+- `molmo-video-analyzer/_bmad-output/planning-artifacts/research/technical-triton-flash-attention-tutorial-deep-dive-2026-03-26.md` — FA inner loop mechanics, numerical stability analysis
+- `molmo-video-analyzer/_bmad-output/planning-artifacts/research/technical-flash-attention-fusion-turboquant-kv-cache-research-2026-03-26.md` — Fusion architecture, precision analysis, 13-system survey, GQA Q-Block pattern
+- `molmo-video-analyzer/_bmad-output/planning-artifacts/research/technical-fused-turboquant-triton-kernel-research-2026-03-25.md` — Original Q@K^T-only analysis (superseded by full FA approach)
+- arXiv 2511.11581 — "Anatomy of Attention" (GQA Q-Block, Triton performance parity with FA-3)
+- arXiv 2405.02803 — "Is Flash Attention Stable?" (FA achieves 1.7x lower RMSE than SDPA)
 
 ### P6: TQ3 bit-packing (research, nice-to-have)
 
@@ -261,7 +361,7 @@ Phase 0 Smoke Test
 
 **Why deferred:** 3-bit indices cross byte boundaries, making parallel pack/unpack non-trivial. No PyTorch/Triton implementation exists — only C/CUDA (ik_llama.cpp). The 30% improvement over TQ4 nibble (4.92x vs 3.76x) doesn't justify the complexity until the easier wins are shipped.
 
-### P6: vLLM native integration
+### P7: vLLM native integration
 
 **Goal:** Run TurboQuant as a vLLM KV cache backend, enabling compressed caching in production serving.
 
@@ -288,7 +388,7 @@ Phase 0 Smoke Test
 
 | Component | Spec | Relevance |
 |-----------|------|-----------|
-| GPU | AMD Radeon 890M (32 GB shared VRAM, gfx1150 RDNA 3.5) | ROCm via HSA override (P7) |
+| GPU | AMD Radeon 890M (32 GB shared VRAM, gfx1150 RDNA 3.5) | ROCm via HSA override (P8) |
 | CPU | AMD Ryzen AI 9 HX 370 (12C/24T, 5.16 GHz) | Algorithm dev, CPU-path testing |
 | NPU | AMD XDNA (Strix) | Future exploration (incompatible with custom cache ops) |
 | RAM | 64 GB DDR5 | Shared with iGPU VRAM |
@@ -311,3 +411,7 @@ Phase 0 Smoke Test
 5. **Don't fight byte alignment.** TQ4 nibble packing (2 values per byte) is trivial and gives 3.76x compression. TQ3 bit-packing (3-bit byte-crossing) is hard and only 30% better. Work with the hardware, not against it.
 
 6. **No PyTorch sub-byte ecosystem.** `torch.uint3` etc. are placeholders with no ops. TorchAO packing is weight-quant-specific. Every KV cache implementation rolls its own Triton kernels. Plan accordingly.
+
+7. **Q@K^T-only fusion is a dead end for multi-layer models.** Materializing attention scores in fp16 between Q@K^T and softmax introduces 0.023 cosine loss per layer, compounding to 0.43 over 36 layers. Full Flash Attention fusion (fp32 accumulation throughout, single fp16 cast at output) is the only correct approach. The 17.8x micro-benchmark speedup was misleading — always validate multi-layer composition early.
+
+8. **No existing system fuses codebook VQ with Flash Attention.** Survey of 13 quantized attention implementations (KIVI, BitDecoding, Kitty, QServe, FlashInfer, etc.) found they all use scalar quantization (INT2/4/8, FP4/8). TurboQuant's vector quantization codebook lookup is architecturally different and requires a novel kernel design.

@@ -106,6 +106,12 @@ omit = [
 fail_under = 95
 show_missing = true
 
+[tool.uv-secure.vulnerability_criteria]
+ignore_vulnerabilities = [
+    "GHSA-5239-wwwm-4pmq",  # Pygments 2.19.1 — ReDoS in AdlLexer. No fix available.
+]
+allow_unused_ignores = false
+
 [dependency-groups]
 dev = [
     "docvet[griffe]>=1.13.0",
