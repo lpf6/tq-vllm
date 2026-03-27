@@ -89,6 +89,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "unit: Unit tests (fast, isolated)",
+    "gpu: GPU tests (require CUDA, run inside ROCm container for AMD)",
     "benchmark: Benchmark tests (require GPU)",
     "slow: Slow-running tests",
 ]
@@ -96,9 +97,13 @@ addopts = ["-ra", "--strict-markers", "--strict-config", "--showlocals"]
 
 [tool.coverage.run]
 source = ["turboquant_consumer"]
+omit = [
+    "src/turboquant_consumer/benchmark.py",
+    "src/turboquant_consumer/triton/*",
+]
 
 [tool.coverage.report]
-fail_under = 85
+fail_under = 95
 show_missing = true
 
 [dependency-groups]

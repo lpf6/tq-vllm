@@ -1,0 +1,31 @@
+FROM docker.io/rocm/pytorch:rocm7.1_ubuntu24.04_py3.12_pytorch_release_2.8.0
+
+# AMD Radeon 890M (gfx1150, RDNA 3.5) — ROCm environment
+# Spoof as gfx1100 until native gfx1150 support ships
+ENV HSA_OVERRIDE_GFX_VERSION=11.0.0
+# Explicit device selection — iGPU is device 0
+ENV ROCR_VISIBLE_DEVICES=0
+
+# Install uv for fast dependency management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Install project dependencies (without dev group — add manually if needed)
+# scipy and einops are runtime deps not bundled in the base image
+RUN pip install --quiet "scipy>=1.10" "einops>=0.8" "accelerate>=0.25" "transformers>=4.57,<5.0" "molmo-utils>=0.0.1" && \
+    pip install --quiet pytest pytest-asyncio pytest-mock pytest-randomly pytest-cov && \
+    rm -rf /root/.cache/pip
+
+# Make project importable without pip install (source mounted at /workspace)
+ENV PYTHONPATH=/workspace/src
+
+WORKDIR /workspace
+
+# Project source mounted at runtime via -v
+# Usage:
+#   podman build -t turboquant-rocm -f infra/Containerfile.rocm .
+#   podman run --rm -it \
+#     --device=/dev/kfd --device=/dev/dri \
+#     --group-add=video \
+#     --security-opt=label=disable \
+#     -v ~/Projects/turboquant-consumer:/workspace:z \
+#     turboquant-rocm
