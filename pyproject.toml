@@ -5,7 +5,7 @@ description = "TurboQuant KV cache compression for consumer GPUs — benchmarked
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
-    { name = "Alberto-Codes", email = "" }
+    { name = "Alberto-Codes" }
 ]
 requires-python = ">=3.12,<3.14"
 dependencies = [
