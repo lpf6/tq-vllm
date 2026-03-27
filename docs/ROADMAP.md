@@ -543,11 +543,82 @@ Quality remains consistent up to 33s — no TQ4-induced degradation. The 19s lim
 
 #### Phase 3: vLLM integration for TQ4 KV cache
 
-**Goal:** Run TQ4 compression inside vLLM's serving stack for production deployment.
+**Goal:** Run TQ4 compression inside vLLM's serving stack for production deployment via the existing `vllm-nvidia.service` quadlet on port 8100.
 
-**Approach:** Custom PagedAttention backend that stores compressed KV pages. Uses the unfused path (CompressedDynamicCache + SDPA) — the fused kernel is not faster than SDPA.
+**Prerequisite:** Phase 2 episode benchmark confirms the compression value proposition with real data. ✅ (experiment 014: 2.5x speedup)
 
-**Prerequisite:** Phase 2 episode benchmark confirms the compression value proposition with real data.
+**Architecture research (2026-03-27):**
+
+vLLM v0.18.0 has a first-class plugin system for custom attention backends:
+- `AttentionBackendEnum.CUSTOM` enum slot + `register_backend()` decorator in `v1/attention/backends/registry.py`
+- `FlashMLASparseBackend` is a direct template — uses custom 656-byte packed format per token (mixed FP8 + BF16 + scales), comparable to our TQ4 68-byte format
+- Custom cache dtype strings supported (precedent: `"fp8_ds_mla"`)
+- `get_kv_cache_shape()` allows non-standard page layouts
+- Block allocator (`KVCacheManager`) is shape-agnostic — works unchanged with smaller pages
+
+**Integration approach: Custom attention backend (plugin, no fork)**
+
+| vLLM Interface | TQ4 Implementation |
+|---|---|
+| `AttentionBackend` | `TQ4AttentionBackend` — declares `"tq4"` cache dtype, custom page shape |
+| `AttentionImpl.forward()` | Dequant TQ4 → FP16 in-kernel, then Flash Attention (SDPA path) |
+| `get_kv_cache_shape()` | `(num_blocks, block_size, packed_bytes_per_token)` |
+| `reshape_and_cache` custom op | Triton kernel: compress incoming K/V → TQ4, write to paged blocks |
+| `AttentionMetadataBuilder` | Reuse Flash Attention's metadata builder |
+
+**TQ4 page layout (per token per head):**
+
+| Component | Size | Notes |
+|---|---|---|
+| Nibble-packed indices | head_dim/2 = 64 bytes | uint8, two 4-bit indices per byte |
+| Norm | 4 bytes | fp32 mandatory (fp16 degrades >10K tokens) |
+| **Total** | **68 bytes** | **vs 256 bytes FP16 = 3.76x compression** |
+
+**Model-level constants (initialized once at load):**
+- Rotation matrix: `[head_dim, head_dim]` fp32 orthogonal (~66 KB for head_dim=128)
+- Lloyd-Max codebook: 16 centroids (TQ4) — deterministic from seed
+- Shared across all layers (validated in 36-layer E2E tests)
+
+**Implementation phases:**
+
+##### Phase 3a: Backend skeleton
+
+| Step | Action | Status |
+|------|--------|--------|
+| 3a.1 | Create `src/turboquant_consumer/vllm/tq4_backend.py` | |
+| 3a.2 | Implement `TQ4AttentionBackend` (subclass `AttentionBackend`) | |
+| 3a.3 | Implement `get_kv_cache_shape()` for TQ4 page layout | |
+| 3a.4 | Stub `TQ4AttentionImpl.forward()` — passthrough to Flash Attention (no compression) | |
+| 3a.5 | Register with `AttentionBackendEnum.CUSTOM` | |
+| 3a.6 | Smoke test: `vllm serve` starts and serves with TQ4 backend selected | |
+
+##### Phase 3b: Compression write path
+
+| Step | Action | Status |
+|------|--------|--------|
+| 3b.1 | Triton kernel: `reshape_and_cache_tq4` — FP16 K/V → rotate → quantize → nibble-pack → store at `slot_mapping` offsets | |
+| 3b.2 | Validate stored blocks match `CompressedDynamicCache` output bit-for-bit | |
+| 3b.3 | Unit tests for pack/unpack round-trip on paged blocks | |
+
+##### Phase 3c: Decompression read path
+
+| Step | Action | Status |
+|------|--------|--------|
+| 3c.1 | In `TQ4AttentionImpl.forward()`: read TQ4 pages, dequant to FP16, call Flash Attention | |
+| 3c.2 | Incremental dequant pattern (only new tokens, not full cache rebuild) | |
+| 3c.3 | Validate output matches HF SDPA path (cosine similarity > 0.999) | |
+| 3c.4 | Multi-layer validation (36 layers, composition > 0.93) | |
+
+##### Phase 3d: Production benchmark
+
+| Step | Action | Status |
+|------|--------|--------|
+| 3d.1 | Re-run experiment 014 with vLLM + TQ4 backend | |
+| 3d.2 | Compare: vLLM-TQ4 vs vLLM-baseline vs HF-TQ4 | |
+| 3d.3 | Measure throughput (tok/s), VRAM, quality | |
+| 3d.4 | Update `vllm-nvidia.service` quadlet to use TQ4 backend | |
+
+**Key risk:** `CacheDType` is a `Literal` type — adding `"tq4"` may require a one-line vLLM source patch or monkey-patch. Not a fork concern, but worth investigating early (Phase 3a).
 
 #### Phase 4: Research — SageAttention-style INT8 path (future)
 
@@ -618,3 +689,5 @@ SageAttention v2 achieves **3x faster than FA2** on RTX 4090 using INT8 for Q@K^
 12. **TurboQuant was never tested on VLMs.** Paper tested only Llama-3.1-8B and Ministral-7B. Visual tokens have fundamentally different KV cache distributions (per-channel value variation, more pronounced key outliers, 10x lower gradient sensitivity). Multiple VLM quantization papers (AKVQ-VL, MBQ, VidKV, CalibQuant) document this. Our MSE-only approach may work precisely because the random rotation decorrelates these distribution differences.
 
 13. **The real video throughput metric is total clip time, not per-token speed.** Processing 19 seconds of video in one 0.6x-speed pass beats five 5-second passes at 1.0x speed — fewer inference calls, full cross-frame context, no stitching artifacts. Compression enables capability (longer context), which dominates per-token speed in the video workload.
+
+14. **vLLM has first-class custom backend support.** `AttentionBackendEnum.CUSTOM` + `register_backend()` decorator (v0.18.0). `FlashMLASparseBackend` is a direct template — 656-byte custom packed format with mixed dtypes. No fork needed for TQ4 integration; the block allocator is shape-agnostic.
