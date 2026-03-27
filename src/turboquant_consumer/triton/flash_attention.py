@@ -65,7 +65,7 @@ _AUTOTUNE_CONFIGS = [
 # ---------------------------------------------------------------------------
 
 
-@triton.autotune(configs=_AUTOTUNE_CONFIGS, key=["N_CTX_Q", "N_CTX_KV", "HEAD_DIM"])
+@triton.autotune(configs=_AUTOTUNE_CONFIGS, key=["N_CTX_Q", "HEAD_DIM"])
 @triton.jit
 def _fwd_kernel(
     Q,
@@ -108,6 +108,8 @@ def _fwd_kernel(
 
     Grid: ``(cdiv(N_CTX_Q, BLOCK_M), batch * H_Q)``.
     Each CTA loads one Q tile and streams K/V tiles through it.
+    Autotuned on ``(N_CTX_Q, HEAD_DIM)`` — KV length excluded to avoid
+    re-autotuning on every decode step.
     """
     # -- Program indices --
     start_m = tl.program_id(0)
