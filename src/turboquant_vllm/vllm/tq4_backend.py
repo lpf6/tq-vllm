@@ -212,8 +212,8 @@ class TQ4AttentionBackend(FlashAttentionBackend):
 
     @staticmethod
     def get_name() -> str:
-        """Must return ``"CUSTOM"`` to match ``AttentionBackendEnum.CUSTOM``."""
-        return "CUSTOM"
+        """Return ``"TQ4_FA"`` for TQ4 FlashAttention backend."""
+        return "TQ4_FA"
 
     @staticmethod
     def get_impl_cls() -> type[AttentionImplBase]:
@@ -976,9 +976,27 @@ class TQ4AttentionImpl(FlashAttentionImpl):
 
 _original_get_kv_cache_spec = None
 
+# Mapping of TQ4 backend types to their class paths
+_TQ4_BACKEND_MAP = {
+    "FA": "turboquant_vllm.vllm.tq4_backend.TQ4AttentionBackend",
+    "TRITON": "turboquant_vllm.vllm.tq4_triton_backend.TQ4TritonBackend",
+    "FLASHINFER": "turboquant_vllm.vllm.tq4_flashinfer_backend.TQ4FlashInferBackend",
+}
+
+_TQ4_BACKEND_NAMES = {
+    "FA": "TQ4_FA",
+    "TRITON": "TQ4_TRITON",
+    "FLASHINFER": "TQ4_FLASHINFER",
+}
+
 
 def register_tq4_backend() -> None:
-    """Register TQ4 as the CUSTOM attention backend.
+    """Register TQ4 backend based on environment variable.
+
+    The backend type is controlled by the ``TQ4_BACKEND`` environment variable:
+    - ``FA`` (default): FlashAttention-based backend for compute capability 8.0+
+    - ``TRITON``: Triton-based backend for compute capability 7.5+
+    - ``FLASHINFER``: FlashInfer-based backend for compute capability 7.5+
 
     In addition to registering the backend class, this monkey-patches
     ``Attention.get_kv_cache_spec`` so that decoder attention layers
@@ -988,17 +1006,34 @@ def register_tq4_backend() -> None:
     Called automatically by the ``vllm.general_plugins`` entry point,
     or manually before starting vLLM::
 
-        from turboquant_vllm.vllm import register_tq4_backend
+        # Set backend type via environment variable
+        export TQ4_BACKEND=TRITON  # or FA, FLASHINFER
 
+        # Then start vLLM with --attention-backend CUSTOM
+        vllm serve <model> --attention-backend CUSTOM
+
+    Or register manually::
+
+        from turboquant_vllm.vllm import register_tq4_backend
         register_tq4_backend()
-        # then start vLLM with --attention-backend CUSTOM
     """
     global _original_get_kv_cache_spec  # noqa: PLW0603
 
-    register_backend(
-        AttentionBackendEnum.CUSTOM,
-        "turboquant_vllm.vllm.tq4_backend.TQ4AttentionBackend",
-    )
+    import os
+
+    backend_type = os.environ.get("TQ4_BACKEND", "FA").upper()
+
+    if backend_type not in _TQ4_BACKEND_MAP:
+        valid_types = ", ".join(_TQ4_BACKEND_MAP.keys())
+        raise ValueError(
+            f"Invalid TQ4_BACKEND value: '{backend_type}'. "
+            f"Valid values are: {valid_types}"
+        )
+
+    class_path = _TQ4_BACKEND_MAP[backend_type]
+    backend_name = _TQ4_BACKEND_NAMES[backend_type]
+
+    register_backend(AttentionBackendEnum.CUSTOM, class_path)
 
     # Register TQ4FullAttentionSpec in the KV cache manager mapping.
     # vLLM uses exact type() match, not isinstance(), so subclasses
@@ -1025,4 +1060,8 @@ def register_tq4_backend() -> None:
         return spec
 
     Attention.get_kv_cache_spec = _tq4_get_kv_cache_spec
-    logger.info("TQ4 attention backend registered as CUSTOM (packed cache)")
+    logger.info(
+        "TQ4 backend registered: %s (via TQ4_BACKEND=%s, use --attention-backend CUSTOM)",
+        backend_name,
+        backend_type,
+    )

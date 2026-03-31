@@ -64,6 +64,8 @@ docs = [
 
 [project.entry-points."vllm.general_plugins"]
 tq4_backend = "turboquant_vllm.vllm:register_tq4_backend"
+tq4_triton_backend = "turboquant_vllm.vllm:register_tq4_triton_backend"
+tq4_flashinfer_backend = "turboquant_vllm.vllm:register_tq4_flashinfer_backend"
 
 [build-system]
 requires = ["uv_build>=0.11.1,<0.12.0"]
