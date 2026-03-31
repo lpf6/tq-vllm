@@ -12,6 +12,8 @@ TurboQuant KV cache compression as a drop-in vLLM plugin. **3.76x compression, n
 
 ## Install
 
+### From PyPI (Recommended)
+
 ```bash
 pip install turboquant-vllm[vllm]
 ```
@@ -22,15 +24,57 @@ Or with [uv](https://docs.astral.sh/uv/):
 uv add turboquant-vllm --extra vllm
 ```
 
-## Quick Start (vLLM)
-
-The TQ4 attention backend registers automatically via vLLM's plugin system:
+### From Source (Local Development)
 
 ```bash
+# Clone the repository
+git clone git@github.com:lpf6/tq-vllm.git
+cd tq-vllm
+
+# Install with pip (editable mode)
+pip install -e .[vllm]
+
+# Or with uv
+uv pip install -e .[vllm]
+```
+
+## Quick Start (vLLM)
+
+The TQ4 attention backend registers automatically via vLLM's plugin system. Choose the appropriate backend for your GPU:
+
+### For GPUs with Compute Capability 8.0+ (e.g., RTX 3090/4090, A100, H100)
+
+```bash
+# FlashAttention backend (default)
+export TQ4_BACKEND=FA
+vllm serve allenai/Molmo2-4B --attention-backend CUSTOM
+```
+
+### For GPUs with Compute Capability 7.5+ (e.g., RTX 2080 Ti, T4)
+
+```bash
+# Triton backend
+export TQ4_BACKEND=TRITON
+vllm serve allenai/Molmo2-4B --attention-backend CUSTOM
+
+# Or use FlashInfer backend
+export TQ4_BACKEND=FLASHINFER
 vllm serve allenai/Molmo2-4B --attention-backend CUSTOM
 ```
 
 No code changes required. The plugin compresses KV cache pages to 68 bytes/token/head (vs 256 bytes FP16).
+
+### Backend Selection
+
+Set the `TQ4_BACKEND` environment variable to choose the implementation:
+
+| Value | Backend | Compute Capability | Description |
+|-------|---------|-------------------|-------------|
+| `FA` | FlashAttention | 8.0+ | Default, best performance on modern GPUs |
+| `TRITON` | Triton | 7.5+ | Pure Triton implementation, good compatibility |
+| `FLASHINFER` | FlashInfer | 7.5+ | FlashInfer-based, optimized for decode |
+
+If `TQ4_BACKEND` is not set, it defaults to `FA` (FlashAttention).
 
 ## Quick Start (HuggingFace)
 

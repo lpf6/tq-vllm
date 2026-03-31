@@ -777,7 +777,48 @@ Override buffer allocation to use TQ4 page size (68 bytes/token/head vs 256 FP16
 - `TQ4AttentionImpl.__init__()` must accept `*args, **kwargs` — vLLM passes `attn_type`, `kv_sharing_target_layer_name`, `sinks` positionally.
 - `get_kv_cache_shape()` alone cannot change buffer allocation — `KVCacheSpec.page_size_bytes` controls the raw buffer size.
 
-#### Phase 4: Research — SageAttention-style INT8 path (future)
+#### Phase 4: Multi-backend support for older GPUs (COMPLETE 2026-03-31)
+
+**Goal:** Support GPUs with compute capability 7.5+ (e.g., RTX 2080 Ti, T4) that cannot use FlashAttention (requires 8.0+).
+
+**Architecture:** Implement TQ4 backends based on TritonAttention and FlashInfer, which support 7.5+ compute capability.
+
+| Backend | Base | Compute Capability | Status |
+|---------|------|-------------------|--------|
+| TQ4_FA | FlashAttention | 8.0+ | ✅ Done (Phase 3) |
+| TQ4_TRITON | TritonAttention | 7.5+ | ✅ Done |
+| TQ4_FLASHINFER | FlashInfer | 7.5+ | ✅ Done |
+
+**Implementation:**
+
+| Step | Action | Status |
+|------|--------|--------|
+| 4.1 | Create `TQ4TritonBackend` extending `TritonAttentionBackend` | ✅ |
+| 4.2 | Create `TQ4TritonImpl` with TQ4 compress/decompress | ✅ |
+| 4.3 | Create `TQ4FlashInferBackend` extending `FlashInferBackend` | ✅ |
+| 4.4 | Create `TQ4FlashInferImpl` with TQ4 compress/decompress | ✅ |
+| 4.5 | Add `TQ4_BACKEND` environment variable for backend selection | ✅ |
+| 4.6 | Update entry points in `pyproject.toml` | ✅ |
+| 4.7 | Add unit tests for new backends | ✅ |
+| 4.8 | Update documentation | ✅ |
+
+**Usage:**
+
+```bash
+# FlashAttention backend (default, 8.0+)
+export TQ4_BACKEND=FA
+vllm serve <model> --attention-backend CUSTOM
+
+# Triton backend (7.5+)
+export TQ4_BACKEND=TRITON
+vllm serve <model> --attention-backend CUSTOM
+
+# FlashInfer backend (7.5+)
+export TQ4_BACKEND=FLASHINFER
+vllm serve <model> --attention-backend CUSTOM
+```
+
+#### Phase 5: Research — SageAttention-style INT8 path (future)
 
 SageAttention v2 achieves **3x faster than FA2** on RTX 4090 using INT8 for Q@K^T. If we could quantize decompressed K tiles to INT8 and use tensor core INT8 matmul, we'd get both TurboQuant compression AND INT8 speed. This is speculative but the only proven path to beating cuDNN FA on consumer GPUs.
 
